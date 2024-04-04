@@ -3,7 +3,7 @@
 
 FROM node:20-bullseye
 
-RUN apt-get update && apt-get install -y sudo supervisor git
+RUN apt-get update && apt-get install -y sudo supervisor git iputils-ping
 RUN mkdir -p /var/log/supervisor
 
 #RUN npm install -g --unsafe-perm genieacs@1.2.11
