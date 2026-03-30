@@ -1,6 +1,6 @@
 import { ClosureComponent, Component, Children } from "mithril";
 import { m } from "./components.ts";
-import config from "./config.ts";
+import { pageSize as PAGE_SIZE } from "./config.ts";
 import filterComponent from "./filter-component.ts";
 import * as store from "./store.ts";
 import * as notifications from "./notifications.ts";
@@ -9,11 +9,8 @@ import putFormComponent from "./put-form-component.ts";
 import indexTableComponent from "./index-table-component.ts";
 import * as overlay from "./overlay.ts";
 import * as smartQuery from "./smart-query.ts";
-import { map, parse, stringify } from "../lib/common/expression/parser.ts";
+import Expression from "../lib/common/expression.ts";
 
-const PAGE_SIZE = config.ui.pageSize || 10;
-
-const memoizedParse = memoize(parse);
 const memoizedJsonParse = memoize(JSON.parse);
 
 const attributes: {
@@ -46,10 +43,22 @@ const formData = {
     .concat([{ id: "file", label: "File", type: "file" }]),
 };
 
-const unpackSmartQuery = memoize((query) => {
-  return map(query, (e) => {
-    if (Array.isArray(e) && e[0] === "FUNC" && e[1] === "Q")
-      return smartQuery.unpack("files", e[2], e[3]);
+const unpackSmartQuery = memoize((query: Expression) => {
+  return query.evaluate((e) => {
+    if (e instanceof Expression.FunctionCall) {
+      if (e.name === "Q") {
+        if (
+          e.args[0] instanceof Expression.Literal &&
+          e.args[1] instanceof Expression.Literal
+        ) {
+          return smartQuery.unpack(
+            "files",
+            e.args[0].value as string,
+            e.args[1].value as string,
+          );
+        }
+      }
+    }
     return e;
   });
 });
@@ -87,7 +96,7 @@ const getDownloadUrl = memoize((filter) => {
   const cols = {};
   for (const attr of attributes) cols[attr.label] = attr.id;
   return `api/files.csv?${m.buildQueryString({
-    filter: stringify(filter),
+    filter: filter.toString(),
     columns: JSON.stringify(cols),
   })}`;
 });
@@ -101,8 +110,11 @@ export function init(
     );
   }
 
-  const sort = args.hasOwnProperty("sort") ? "" + args["sort"] : "";
-  const filter = args.hasOwnProperty("filter") ? "" + args["filter"] : "";
+  let filter: Expression = null;
+  let sort: Record<string, number> = null;
+  if (args.hasOwnProperty("filter"))
+    filter = Expression.parse(args["filter"] as string);
+  if (args.hasOwnProperty("sort")) sort = JSON.parse(args["sort"] as string);
   return Promise.resolve({ filter, sort });
 }
 
@@ -118,9 +130,11 @@ export const component: ClosureComponent = (): Component => {
       }
 
       function onFilterChanged(filter): void {
-        const ops = { filter };
+        const ops = {};
+        if (!(filter instanceof Expression.Literal && filter.value))
+          ops["filter"] = filter.toString();
         if (vnode.attrs["sort"]) ops["sort"] = vnode.attrs["sort"];
-        m.route.set("/admin/files", ops);
+        m.route.set("/files", ops);
       }
 
       const sort = vnode.attrs["sort"]
@@ -137,13 +151,12 @@ export const component: ClosureComponent = (): Component => {
           _sort[attributes[Math.abs(index) - 1].id] = Math.sign(index);
         const ops = { sort: JSON.stringify(_sort) };
         if (vnode.attrs["filter"]) ops["filter"] = vnode.attrs["filter"];
-        m.route.set("/admin/files", ops);
+        m.route.set("/files", ops);
       }
 
-      let filter = vnode.attrs["filter"]
-        ? memoizedParse(vnode.attrs["filter"])
-        : true;
-      filter = unpackSmartQuery(filter);
+      const filter = unpackSmartQuery(
+        vnode.attrs["filter"] ?? new Expression.Literal(true),
+      );
 
       const files = store.fetch("files", filter, {
         limit: vnode.state["showCount"] || PAGE_SIZE,
@@ -163,14 +176,20 @@ export const component: ClosureComponent = (): Component => {
       attrs["onSortChange"] = onSortChange;
       attrs["downloadUrl"] = downloadUrl;
       attrs["recordActionsCallback"] = (file) => {
-        return [m("a", { href: "api/blob/files/" + file["_id"] }, "Download")];
+        return [
+          m(
+            "a.text-cyan-700 hover:text-cyan-900",
+            { href: "api/blob/files/" + file["_id"] },
+            "Download",
+          ),
+        ];
       };
 
       if (window.authorizer.hasAccess("files", 3)) {
         attrs["actionsCallback"] = (selected: Set<string>): Children => {
           return [
             m(
-              "button.primary",
+              "button.px-4 py-2 border border-stone-300 shadow-xs text-sm font-medium rounded-md text-stone-700 bg-white hover:bg-stone-50 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed",
               {
                 title: "Create new file",
                 onclick: () => {
@@ -257,7 +276,7 @@ export const component: ClosureComponent = (): Component => {
               "New",
             ),
             m(
-              "button.primary",
+              "button.px-4 py-2 border border-stone-300 shadow-xs text-sm font-medium rounded-md text-stone-700 bg-white hover:bg-stone-50 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed",
               {
                 title: "Delete selected files",
                 disabled: !selected.size,
@@ -300,7 +319,7 @@ export const component: ClosureComponent = (): Component => {
       };
 
       return [
-        m("h1", "Listing files"),
+        m("h1.text-xl font-medium text-stone-900 mb-5", "Listing files"),
         m(filterComponent, filterAttrs),
         m(
           "loading",

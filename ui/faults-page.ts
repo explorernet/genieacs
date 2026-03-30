@@ -1,18 +1,15 @@
 import { ClosureComponent, Component, Children } from "mithril";
 import { m } from "./components.ts";
-import config from "./config.ts";
+import { pageSize as PAGE_SIZE } from "./config.ts";
 import indexTableComponent from "./index-table-component.ts";
 import filterComponent from "./filter-component.ts";
 import * as store from "./store.ts";
 import * as notifications from "./notifications.ts";
 import memoize from "../lib/common/memoize.ts";
 import * as smartQuery from "./smart-query.ts";
-import { map, parse, stringify } from "../lib/common/expression/parser.ts";
 import { stringify as yamlStringify } from "../lib/common/yaml.ts";
+import Expression from "../lib/common/expression.ts";
 
-const PAGE_SIZE = config.ui.pageSize || 10;
-
-const memoizedParse = memoize(parse);
 const memoizedJsonParse = memoize(JSON.parse);
 
 const attributes = [
@@ -33,15 +30,27 @@ const getDownloadUrl = memoize((filter) => {
   }
 
   return `api/faults.csv?${m.buildQueryString({
-    filter: stringify(filter),
+    filter: filter.toString(),
     columns: JSON.stringify(cols),
   })}`;
 });
 
-const unpackSmartQuery = memoize((query) => {
-  return map(query, (e) => {
-    if (Array.isArray(e) && e[0] === "FUNC" && e[1] === "Q")
-      return smartQuery.unpack("faults", e[2], e[3]);
+const unpackSmartQuery = memoize((query: Expression) => {
+  return query.evaluate((e) => {
+    if (e instanceof Expression.FunctionCall) {
+      if (e.name === "Q") {
+        if (
+          e.args[0] instanceof Expression.Literal &&
+          e.args[1] instanceof Expression.Literal
+        ) {
+          return smartQuery.unpack(
+            "faults",
+            e.args[0].value as string,
+            e.args[1].value as string,
+          );
+        }
+      }
+    }
     return e;
   });
 });
@@ -66,9 +75,11 @@ export function init(
       new Error("You are not authorized to view this page"),
     );
   }
-
-  const sort = args.hasOwnProperty("sort") ? "" + args["sort"] : "";
-  const filter = args.hasOwnProperty("filter") ? "" + args["filter"] : "";
+  let filter: Expression = null;
+  let sort: Record<string, number> = null;
+  if (args.hasOwnProperty("filter"))
+    filter = Expression.parse(args["filter"] as string);
+  if (args.hasOwnProperty("sort")) sort = JSON.parse(args["sort"] as string);
   return Promise.resolve({ filter, sort });
 }
 
@@ -84,7 +95,9 @@ export const component: ClosureComponent = (): Component => {
       }
 
       function onFilterChanged(filter): void {
-        const ops = { filter };
+        const ops = {};
+        if (!(filter instanceof Expression.Literal && filter.value))
+          ops["filter"] = filter.toString();
         if (vnode.attrs["sort"]) ops["sort"] = vnode.attrs["sort"];
         m.route.set("/faults", ops);
       }
@@ -108,10 +121,9 @@ export const component: ClosureComponent = (): Component => {
         m.route.set("/faults", ops);
       }
 
-      let filter = vnode.attrs["filter"]
-        ? memoizedParse(vnode.attrs["filter"])
-        : true;
-      filter = unpackSmartQuery(filter);
+      const filter = unpackSmartQuery(
+        vnode.attrs["filter"] ?? new Expression.Literal(true),
+      );
 
       const faults = store.fetch("faults", filter, {
         limit: vnode.state["showCount"] || PAGE_SIZE,
@@ -127,14 +139,22 @@ export const component: ClosureComponent = (): Component => {
             fault["device"],
           )}`;
 
-          return m("a", { href: deviceHref }, fault["device"]);
+          return m(
+            "a.text-cyan-700 hover:text-cyan-900 font-medium",
+            { href: deviceHref },
+            fault["device"],
+          );
         }
 
         if (attr.id === "message")
-          return m("long-text", { text: fault["message"] });
+          return m("long-text", { text: fault["message"], class: "max-w-xs" });
 
-        if (attr.id === "detail")
-          return m("long-text", { text: yamlStringify(fault["detail"]) });
+        if (attr.id === "detail") {
+          return m("long-text", {
+            text: yamlStringify(fault["detail"]),
+            class: "max-w-xs",
+          });
+        }
 
         if (attr.id === "timestamp")
           return new Date(fault["timestamp"]).toLocaleString();
@@ -155,7 +175,7 @@ export const component: ClosureComponent = (): Component => {
       if (window.authorizer.hasAccess("faults", 3)) {
         attrs["actionsCallback"] = (selected: Set<string>): Children => {
           return m(
-            "button.primary",
+            "button.px-4 py-2 border border-stone-300 shadow-xs text-sm font-medium rounded-md text-stone-700 bg-white hover:bg-stone-50 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed",
             {
               disabled: selected.size === 0,
               title: "Delete selected faults",
@@ -190,7 +210,7 @@ export const component: ClosureComponent = (): Component => {
       };
 
       return [
-        m("h1", "Listing faults"),
+        m("h1.text-xl font-medium text-stone-900 mb-5", "Listing faults"),
         m(filterComponent, filterAttrs),
         m(
           "loading",
