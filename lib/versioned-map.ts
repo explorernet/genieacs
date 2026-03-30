@@ -7,10 +7,10 @@ interface Revisions<V> {
 }
 
 export default class VersionedMap<K, V> {
-  private declare _sizeDiff: number[];
-  private declare _revision: number;
-  private declare map: Map<K, (V | symbol)[]>;
-  public declare dirty: number;
+  declare private _sizeDiff: number[];
+  declare private _revision: number;
+  declare private map: Map<K, (V | symbol)[]>;
+  declare public dirty: number;
 
   public constructor() {
     this._sizeDiff = [0];
@@ -181,6 +181,14 @@ export default class VersionedMap<K, V> {
 
       if (last === NONEXISTENT && !v.some((vv) => vv !== NONEXISTENT))
         this.map.delete(k);
+    }
+  }
+
+  public *[Symbol.iterator](): IterableIterator<[K, V]> {
+    for (const [key, revisions] of this.map) {
+      const last = revisions[revisions.length - 1];
+      if (last === NONEXISTENT) continue;
+      yield [key, last as V];
     }
   }
 }

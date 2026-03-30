@@ -1,31 +1,29 @@
-import { ClosureComponent, Component } from "mithril";
+import { ClosureComponent } from "mithril";
 import { m } from "./components.ts";
-import config from "./config.ts";
+import { overview } from "./config.ts";
 import * as store from "./store.ts";
 import pieChartComponent from "./pie-chart-component.ts";
 
-const GROUPS = config.ui.overview.groups || {};
-const CHARTS = {};
-for (const group of Object.values(GROUPS)) {
-  for (const chartName of Object.values(group["charts"]) as string[])
-    CHARTS[chartName] = config.ui.overview.charts[chartName];
+const GROUPS = overview.groups;
+const CHARTS: typeof overview.charts = {};
+for (const group of GROUPS) {
+  for (const chartName of group.charts)
+    CHARTS[chartName] = overview.charts[chartName];
 }
 
-function queryCharts(charts: Record<string, unknown>): Record<string, unknown> {
+function queryCharts(charts: typeof overview.charts): typeof charts {
   charts = Object.assign({}, charts);
   for (let [chartName, chart] of Object.entries(charts)) {
-    charts[chartName] = chart = Object.assign({}, chart);
-    chart["slices"] = Object.assign({}, chart["slices"]);
-    for (let [sliceName, slice] of Object.entries(chart["slices"])) {
-      const filter = slice["filter"];
-      chart["slices"][sliceName] = slice = Object.assign({}, slice);
-      slice["count"] = store.count("devices", filter);
+    charts[chartName] = chart = { ...chart };
+    chart.slices = chart.slices.map((s) => ({ ...s }));
+    for (const slice of chart.slices) {
+      slice["count"] = store.count("devices", slice.filter);
     }
   }
   return charts;
 }
 
-export function init(): Promise<Record<string, unknown>> {
+export function init(): Promise<{ charts: typeof overview.charts }> {
   if (!window.authorizer.hasAccess("devices", 1)) {
     return Promise.reject(
       new Error("You are not authorized to view this page"),
@@ -35,34 +33,48 @@ export function init(): Promise<Record<string, unknown>> {
   return Promise.resolve({ charts: queryCharts(CHARTS) });
 }
 
-export const component: ClosureComponent = (): Component => {
+interface Attrs {
+  charts: typeof overview.charts;
+}
+
+export const component: ClosureComponent<Attrs> = () => {
   return {
     view: (vnode) => {
       document.title = "Overview - GenieACS";
       const children = [];
-      for (const group of Object.values(GROUPS)) {
-        if (group["label"])
+      for (const group of GROUPS) {
+        if (group.label) {
           children.push(
-            m("h1", store.evaluateExpression(group["label"], null)),
+            m("h1.text-xl font-medium text-stone-900 mb-5", group["label"]),
           );
-
-        const groupChildren = [];
-        for (const chartName of Object.values(group["charts"]) as string[]) {
-          const chart = vnode.attrs["charts"][chartName];
-          const chartChildren = [];
-          if (chart.label)
-            chartChildren.push(
-              m("h2", store.evaluateExpression(chart.label, null)),
-            );
-
-          const attrs = {};
-          attrs["chart"] = chart;
-          chartChildren.push(m(pieChartComponent, attrs));
-
-          groupChildren.push(m(".overview-chart", chartChildren));
         }
 
-        children.push(m(".overview-chart-group", groupChildren));
+        const groupChildren = [];
+        for (const chartName of group.charts) {
+          const chart = vnode.attrs.charts[chartName];
+          const chartChildren = [];
+          if (chart.label) {
+            chartChildren.push(
+              m(
+                "h2.text-lg font-semibold text-stone-700 truncate mb-5 text-center",
+                chart.label,
+              ),
+            );
+          }
+
+          chartChildren.push(m(pieChartComponent, { chart }));
+
+          groupChildren.push(
+            m(
+              "div.p-4 bg-white shadow-sm rounded-lg sm:p-6 sm:px-8",
+              chartChildren,
+            ),
+          );
+        }
+
+        children.push(
+          m("div.flex justify-center mt-5 mb-10 gap-x-10", groupChildren),
+        );
       }
 
       return children;

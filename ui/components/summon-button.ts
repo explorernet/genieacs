@@ -1,31 +1,41 @@
-import { ClosureComponent, Component } from "mithril";
+import { ClosureComponent } from "mithril";
 import { m } from "../components.ts";
 import * as taskQueue from "../task-queue.ts";
 import * as store from "../store.ts";
 import * as notifications from "../notifications.ts";
+import Expression from "../../lib/common/expression.ts";
+import { FlatDevice } from "../../lib/ui/db.ts";
 
-const component: ClosureComponent = (): Component => {
+interface Attrs {
+  device: FlatDevice;
+  parameters: Record<string, Expression>;
+}
+
+const component: ClosureComponent<Attrs> = () => {
   return {
     view: (vnode) => {
-      const device = vnode.attrs["device"];
+      const device = vnode.attrs.device;
 
       return m(
-        "button.primary",
+        "button",
         {
+          class:
+            "px-2.5 py-1.5 border border-transparent text-xs font-medium rounded-sm shadow-xs text-white bg-cyan-600 hover:bg-cyan-700 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500",
           title: "Initiate session and refresh basic parameters",
           onclick: (e) => {
             e.target.disabled = true;
             const params = Object.values(vnode.attrs["parameters"])
               .map((exp) => {
-                if (!Array.isArray(exp) || exp[0] !== "PARAM") return null;
-                return store.evaluateExpression(exp[1], device) as string;
+                if (exp instanceof Expression.Parameter)
+                  return exp.path.toString();
+                return null;
               })
               .filter((exp) => !!exp);
 
             const task = {
               name: "getParameterValues",
               parameterNames: params,
-              device: device["DeviceID.ID"].value[0],
+              device: device["DeviceID.ID"] as string,
             };
 
             taskQueue

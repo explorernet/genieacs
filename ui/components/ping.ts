@@ -47,7 +47,7 @@ const component: ClosureComponent = (vn): Component => {
       try {
         const url = new URL(param.value[0]);
         h = url.hostname;
-      } catch (err) {
+      } catch {
         // Ignore
       }
 
@@ -60,7 +60,7 @@ const component: ClosureComponent = (vn): Component => {
         }
       }
 
-      return m("div", host ? `Pinging ${host}:` : "");
+      return m("div.text-sm my-4", host ? `Pinging ${host}:` : "");
     },
   };
 };

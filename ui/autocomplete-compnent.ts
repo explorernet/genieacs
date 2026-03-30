@@ -4,15 +4,15 @@ type AutocompleteCallback = (
 ) => void;
 
 export default class Autocomplete {
-  private declare callback: AutocompleteCallback;
-  private declare element: HTMLInputElement;
-  private declare hideTimeout: NodeJS.Timeout;
-  private declare visible: boolean;
-  private declare default: string;
-  private declare selection: number;
-  private declare container: HTMLElement;
+  declare private callback: AutocompleteCallback;
+  declare private element: HTMLInputElement;
+  declare private hideTimeout: NodeJS.Timeout;
+  declare private visible: boolean;
+  declare private default: string;
+  declare private selection: number;
+  declare private container: HTMLElement;
 
-  public constructor(className: string, callback: AutocompleteCallback) {
+  public constructor(callback: AutocompleteCallback) {
     this.callback = callback;
     this.element = null;
     this.hideTimeout = null;
@@ -24,7 +24,8 @@ export default class Autocomplete {
     this.container.style.position = "absolute";
     this.container.style.display = "block";
     this.container.style.opacity = "0";
-    this.container.className = className;
+    this.container.className =
+      "absolute py-1 mt-2 rounded-md shadow-lg bg-white";
   }
 
   public attach(el: HTMLInputElement): void {
@@ -118,7 +119,9 @@ export default class Autocomplete {
       if (!this.visible) {
         if (!this.hideTimeout) {
           document.body.appendChild(this.container);
-          window.getComputedStyle(this.container).opacity;
+          // Force style recalc so the initial opacity is resolved before
+          // setting it to "1", allowing the CSS transition to play.
+          void window.getComputedStyle(this.container).opacity;
         } else {
           clearTimeout(this.hideTimeout);
           this.hideTimeout = null;
@@ -140,9 +143,10 @@ export default class Autocomplete {
       for (const [idx, suggestion] of suggestions.entries()) {
         const e = document.createElement("div");
         if (suggestion.tip) e.title = suggestion.tip;
-        e.classList.add("suggestion");
+        e.className =
+          "text-stone-700 block px-4 py-2 text-sm hover:bg-stone-100 hover:text-stone-900";
         if (idx === this.selection) {
-          e.classList.add("selected");
+          e.classList.add("bg-stone-100", "text-stone-900");
           selectedElement = e;
         }
 
