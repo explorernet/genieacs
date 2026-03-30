@@ -3,13 +3,12 @@
 
 FROM node:20-bullseye
 
-RUN apt-get update && apt-get install -y sudo supervisor git iputils-ping
+RUN apt-get update && apt-get install -y iputils-ping
 RUN mkdir -p /var/log/supervisor
 
 #RUN npm install -g --unsafe-perm genieacs@1.2.11
-WORKDIR /opt
-RUN git clone https://github.com/explorernet/genieacs.git --depth 1
 WORKDIR /opt/genieacs
+COPY . .
 RUN npm install 
 RUN npm i -D tslib
 RUN npm run build
@@ -24,12 +23,6 @@ RUN chown genieacs:genieacs /var/log/genieacs
 
 ADD genieacs.logrotate /etc/logrotate.d/genieacs
 
-WORKDIR /opt
-RUN git clone https://github.com/GeiserX/genieacs-services -b 1.2.8 --depth 1
-RUN cp genieacs-services/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-RUN cp genieacs-services/run_with_env.sh /usr/bin/run_with_env.sh
-RUN chmod +x /usr/bin/run_with_env.sh
+RUN chmod +x ./entrypoint.sh
 
-WORKDIR /var/log/genieacs
-
-CMD ["/usr/bin/supervisord","-c","/etc/supervisor/conf.d/supervisord.conf"]
+ENTRYPOINT ["./entrypoint.sh"]
