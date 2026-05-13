@@ -10,6 +10,7 @@ const singular = {
   files: "file",
   users: "user",
   permissions: "permission",
+  views: "view",
 };
 
 function createField(current, attr, focus): Children {
@@ -85,7 +86,7 @@ function createField(current, attr, focus): Children {
     const attrs = {
       id: attr.id,
       value: current.object[attr.id],
-      mode: "javascript",
+      mode: attr.mode || "javascript",
       onSubmit: (dom) => {
         dom.form.querySelector("button[type=submit]").click();
       },

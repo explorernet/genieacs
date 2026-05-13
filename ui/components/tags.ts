@@ -2,6 +2,7 @@ import { ClosureComponent } from "mithril";
 import { m } from "../components.ts";
 import * as notifications from "../notifications.ts";
 import * as store from "../store.ts";
+import { invalidate } from "../reactive-store.ts";
 import { icon } from "../tailwind-utility-components.ts";
 import { decodeTag } from "../../lib/util.ts";
 import Expression from "../../lib/common/expression.ts";
@@ -18,7 +19,8 @@ const component: ClosureComponent<Attrs> = () => {
       const device = vnode.attrs.device;
       let writable = true;
       if ("writable" in vnode.attrs)
-        writable = !!store.evaluateExpression(vnode.attrs.writable, device);
+        writable = !!store.evaluateExpression(vnode.attrs.writable, device)
+          .value;
 
       const tags = [];
       for (const p of Object.keys(device))
@@ -71,6 +73,7 @@ const component: ClosureComponent<Attrs> = () => {
                         `${deviceId}: Tags updated`,
                       );
                       store.setTimestamp(Date.now());
+                      invalidate(Date.now());
                     })
                     .catch((err) => {
                       e.target.disabled = false;
@@ -117,6 +120,7 @@ const component: ClosureComponent<Attrs> = () => {
                     e.target.disabled = false;
                     notifications.push("success", `${deviceId}: Tags updated`);
                     store.setTimestamp(Date.now());
+                    invalidate(Date.now());
                   })
                   .catch((err) => {
                     e.target.disabled = false;

@@ -1,6 +1,6 @@
 import { ClosureComponent, Component, Children } from "mithril";
 import { m } from "./components.ts";
-import { pageSize as PAGE_SIZE } from "./config.ts";
+import * as config from "./config.ts";
 import filterComponent from "./filter-component.ts";
 import * as store from "./store.ts";
 import * as notifications from "./notifications.ts";
@@ -12,28 +12,28 @@ import * as smartQuery from "./smart-query.ts";
 import Expression from "../lib/common/expression.ts";
 import { loadCodeMirror } from "./dynamic-loader.ts";
 
+const PAGE_SIZE = config.pageSize || 10;
+
+const memoizedParse = memoize(Expression.parse);
 const memoizedJsonParse = memoize(JSON.parse);
 
 const attributes = [
   { id: "_id", label: "Name" },
-  { id: "script", label: "Script", type: "code", mode: "javascript" },
+  { id: "script", label: "Script", type: "code", mode: "jsx" },
 ];
 
 const unpackSmartQuery = memoize((query: Expression) => {
-  return query.evaluate((e) => {
-    if (e instanceof Expression.FunctionCall) {
-      if (e.name === "Q") {
-        if (
-          e.args[0] instanceof Expression.Literal &&
-          e.args[1] instanceof Expression.Literal
-        ) {
-          return smartQuery.unpack(
-            "virtualParameters",
-            e.args[0].value as string,
-            e.args[1].value as string,
-          );
-        }
-      }
+  return query.map((e) => {
+    if (
+      e instanceof Expression.FunctionCall &&
+      e.name === "Q" &&
+      e.args.length >= 2
+    ) {
+      const arg0 =
+        e.args[0] instanceof Expression.Literal ? e.args[0].value : null;
+      const arg1 =
+        e.args[1] instanceof Expression.Literal ? e.args[1].value : null;
+      return smartQuery.unpack("views", arg0 as string, arg1 as string);
     }
     return e;
   });
@@ -53,24 +53,24 @@ function putActionHandler(action, _object, isNew): Promise<ValidationErrors> {
       if (!id) return void resolve({ _id: "ID can not be empty" });
 
       store
-        .resourceExists("virtualParameters", id)
+        .resourceExists("views", id)
         .then((exists) => {
           if (exists && isNew) {
             store.setTimestamp(Date.now());
-            return void resolve({ _id: "Virtual parameter already exists" });
+            return void resolve({ _id: "View already exists" });
           }
 
           if (!exists && !isNew) {
             store.setTimestamp(Date.now());
-            return void resolve({ _id: "Virtual parameter does not exist" });
+            return void resolve({ _id: "View does not exist" });
           }
 
           store
-            .putResource("virtualParameters", id, object)
+            .putResource("views", id, object)
             .then(() => {
               notifications.push(
                 "success",
-                `Virtual parameter ${exists ? "updated" : "created"}`,
+                `View ${exists ? "updated" : "created"}`,
               );
               store.setTimestamp(Date.now());
               resolve(null);
@@ -85,12 +85,11 @@ function putActionHandler(action, _object, isNew): Promise<ValidationErrors> {
         })
         .catch(reject);
     } else if (action === "delete") {
-      if (!confirm("Deleting virtual parameter. Are you sure?"))
-        return void resolve(null);
+      if (!confirm("Deleting view. Are you sure?")) return void resolve(null);
       store
-        .deleteResource("virtualParameters", object["_id"])
+        .deleteResource("views", object["_id"])
         .then(() => {
-          notifications.push("success", "Virtual parameter deleted");
+          notifications.push("success", "View deleted");
           store.setTimestamp(Date.now());
           resolve(null);
         })
@@ -105,14 +104,14 @@ function putActionHandler(action, _object, isNew): Promise<ValidationErrors> {
 }
 
 const formData = {
-  resource: "virtualParameters",
+  resource: "views",
   attributes: attributes,
 };
 
-const getDownloadUrl = memoize((filter) => {
+const getDownloadUrl = memoize((filter: Expression) => {
   const cols = {};
   for (const attr of attributes) cols[attr.label] = attr.id;
-  return `api/virtualParameters.csv?${m.buildQueryString({
+  return `api/views.csv?${m.buildQueryString({
     filter: filter.toString(),
     columns: JSON.stringify(cols),
   })}`;
@@ -121,17 +120,14 @@ const getDownloadUrl = memoize((filter) => {
 export function init(
   args: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  if (!window.authorizer.hasAccess("virtualParameters", 2)) {
+  if (!window.authorizer.hasAccess("views", 2)) {
     return Promise.reject(
       new Error("You are not authorized to view this page"),
     );
   }
 
-  let filter: Expression = null;
-  let sort: Record<string, number> = null;
-  if (args.hasOwnProperty("filter"))
-    filter = Expression.parse(args["filter"] as string);
-  if (args.hasOwnProperty("sort")) sort = JSON.parse(args["sort"] as string);
+  const sort = args.hasOwnProperty("sort") ? "" + args["sort"] : "";
+  const filter = args.hasOwnProperty("filter") ? "" + args["filter"] : "";
 
   return new Promise((resolve, reject) => {
     loadCodeMirror()
@@ -145,7 +141,7 @@ export function init(
 export const component: ClosureComponent = (): Component => {
   return {
     view: (vnode) => {
-      document.title = "Virtual Parameters - GenieACS";
+      document.title = "Views - GenieACS";
 
       function showMore(): void {
         vnode.state["showCount"] =
@@ -154,11 +150,9 @@ export const component: ClosureComponent = (): Component => {
       }
 
       function onFilterChanged(filter): void {
-        const ops = {};
-        if (!(filter instanceof Expression.Literal && filter.value))
-          ops["filter"] = filter.toString();
+        const ops = { filter };
         if (vnode.attrs["sort"]) ops["sort"] = vnode.attrs["sort"];
-        m.route.set("/virtualParameters", ops);
+        m.route.set("/views", ops);
       }
 
       const sort = vnode.attrs["sort"]
@@ -175,31 +169,32 @@ export const component: ClosureComponent = (): Component => {
           _sort[attributes[Math.abs(index) - 1].id] = Math.sign(index);
         const ops = { sort: JSON.stringify(_sort) };
         if (vnode.attrs["filter"]) ops["filter"] = vnode.attrs["filter"];
-        m.route.set("/virtualParameters", ops);
+        m.route.set("/views", ops);
       }
 
-      const filter = unpackSmartQuery(
-        vnode.attrs["filter"] ?? new Expression.Literal(true),
-      );
+      let filter: Expression = vnode.attrs["filter"]
+        ? memoizedParse(vnode.attrs["filter"])
+        : new Expression.Literal(true);
+      filter = unpackSmartQuery(filter);
 
-      const virtualParameters = store.fetch("virtualParameters", filter, {
+      const views = store.fetch("views", filter, {
         limit: vnode.state["showCount"] || PAGE_SIZE,
         sort: sort,
       });
 
-      const count = store.count("virtualParameters", filter);
+      const count = store.count("views", filter);
 
       const downloadUrl = getDownloadUrl(filter);
 
       const attrs = {};
       attrs["attributes"] = attributes;
-      attrs["data"] = virtualParameters.value;
+      attrs["data"] = views.value;
       attrs["total"] = count.value;
       attrs["showMoreCallback"] = showMore;
       attrs["sortAttributes"] = sortAttributes;
       attrs["onSortChange"] = onSortChange;
       attrs["downloadUrl"] = downloadUrl;
-      attrs["recordActionsCallback"] = (virtualParameter) => {
+      attrs["recordActionsCallback"] = (cmp) => {
         return [
           m(
             "button.text-cyan-700 hover:text-cyan-900 font-medium",
@@ -210,7 +205,7 @@ export const component: ClosureComponent = (): Component => {
                   putFormComponent,
                   Object.assign(
                     {
-                      base: virtualParameter,
+                      base: cmp,
                       actionHandler: (action, object) => {
                         return new Promise<void>((resolve) => {
                           putActionHandler(action, object, false)
@@ -250,13 +245,13 @@ export const component: ClosureComponent = (): Component => {
         ];
       };
 
-      if (window.authorizer.hasAccess("virtualParameters", 3)) {
+      if (window.authorizer.hasAccess("views", 3)) {
         attrs["actionsCallback"] = (selected: Set<string>): Children => {
           return [
             m(
-              "button.px-4 py-2 border border-stone-300 shadow-xs text-sm font-medium rounded-md text-stone-700 bg-white hover:bg-stone-50 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed",
+              "button.px-4 py-2 border border-stone-300 shadow-sm text-sm font-medium rounded-md text-stone-700 bg-white hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed",
               {
-                title: "Create new virtual parameter",
+                title: "Create new view",
                 onclick: () => {
                   let cb: () => Children = null;
                   const comp = m(
@@ -300,15 +295,13 @@ export const component: ClosureComponent = (): Component => {
               "New",
             ),
             m(
-              "button.px-4 py-2 border border-stone-300 shadow-xs text-sm font-medium rounded-md text-stone-700 bg-white hover:bg-stone-50 focus:outline-hidden focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed",
+              "button.px-4 py-2 border border-stone-300 shadow-sm text-sm font-medium rounded-md text-stone-700 bg-white hover:bg-stone-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed",
               {
-                title: "Delete selected virtual parameters",
+                title: "Delete selected views",
                 disabled: !selected.size,
                 onclick: (e) => {
                   if (
-                    !confirm(
-                      `Deleting ${selected.size} virtual parameters. Are you sure?`,
-                    )
+                    !confirm(`Deleting ${selected.size} views. Are you sure?`)
                   )
                     return;
 
@@ -316,13 +309,13 @@ export const component: ClosureComponent = (): Component => {
                   e.target.disabled = true;
                   Promise.all(
                     Array.from(selected).map((id) =>
-                      store.deleteResource("virtualParameters", id),
+                      store.deleteResource("views", id),
                     ),
                   )
                     .then((res) => {
                       notifications.push(
                         "success",
-                        `${res.length} virtual parameters deleted`,
+                        `${res.length} views deleted`,
                       );
                       store.setTimestamp(Date.now());
                     })
@@ -339,20 +332,17 @@ export const component: ClosureComponent = (): Component => {
       }
 
       const filterAttrs = {
-        resource: "virtualParameters",
+        resource: "views",
         filter: vnode.attrs["filter"],
         onChange: onFilterChanged,
       };
 
       return [
-        m(
-          "h1.text-xl font-medium text-stone-900 mb-5",
-          "Listing virtual parameters",
-        ),
+        m("h1.text-xl font-medium text-stone-900 mb-5", "Listing views"),
         m(filterComponent, filterAttrs),
         m(
           "loading",
-          { queries: [virtualParameters, count] },
+          { queries: [views, count] },
           m(indexTableComponent, attrs),
         ),
       ];

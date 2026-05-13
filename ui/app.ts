@@ -1,6 +1,7 @@
 import m, { RouteResolver } from "mithril";
 import layout from "./layout.tsx";
 import * as store from "./store.ts";
+import { invalidate } from "./reactive-store.ts";
 import * as wizardPage from "./wizard-page.ts";
 import * as loginPage from "./login-page.tsx";
 import * as overviewPage from "./overview-page.ts";
@@ -21,6 +22,10 @@ import { PermissionSet, UiConfig } from "../lib/types.ts";
 import drawerComponent from "./drawer-component.ts";
 import { render as renderOverlay } from "./overlay.ts";
 import Expression from "../lib/common/expression.ts";
+import * as viewsPage from "./views-page.ts";
+
+export { ViewNode } from "./views.ts";
+export { Signal } from "./signals.ts";
 
 declare global {
   interface Window {
@@ -32,6 +37,7 @@ declare global {
     clientConfig: UiConfig;
     configSnapshot: string;
     genieacsVersion: string;
+    clockSkew: number;
   }
 }
 
@@ -77,6 +83,7 @@ function pagify(pageName, page): RouteResolver {
 
   component.onmatch = (args, requestedPath) => {
     store.setTimestamp(Date.now());
+    invalidate(Date.now());
     if (!page.init) {
       state = null;
       return null;
@@ -115,6 +122,7 @@ m.route(document.body, "/overview", {
   "/config": pagify("config", configPage),
   "/users": pagify("users", usersPage),
   "/permissions": pagify("permissions", permissionsPage),
+  "/views": pagify("views", viewsPage),
   "/login": {
     render: () => [m(loginPage.component), renderOverlay(), m(drawerComponent)],
   },
